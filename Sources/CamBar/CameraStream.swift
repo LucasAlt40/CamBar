@@ -40,8 +40,9 @@ final class CameraStream: ObservableObject {
     enum Profile {
         case standby, normal, hd
         var width: Int { self == .hd ? 1280 : self == .normal ? 720 : 480 }
-        /// Standby is throttled; otherwise frames pass through exactly as the camera sends them.
-        var rateArgs: [String] { self == .standby ? ["-r", "2"] : ["-fps_mode", "passthrough"] }
+        /// Standby only decodes keyframes (about one picture per second), which is where the CPU goes.
+        var inputArgs: [String] { self == .standby ? ["-skip_frame", "nokey"] : [] }
+        var rateArgs: [String] { ["-fps_mode", "passthrough"] }
         var quality: Int { self == .hd ? 5 : self == .normal ? 7 : 8 }
     }
     var profile: Profile = .normal
@@ -89,7 +90,7 @@ final class CameraStream: ObservableObject {
         p.arguments = [
             "-loglevel", "verbose", "-fflags", "nobuffer", "-flags", "low_delay",
             "-hwaccel", "videotoolbox",
-        ] + transportArgs + [
+        ] + profile.inputArgs + transportArgs + [
             "-i", url, "-an",
             "-vf", "scale='min(\(profile.width),iw)':-2",
         ] + profile.rateArgs + [
