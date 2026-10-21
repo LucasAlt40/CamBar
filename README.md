@@ -4,6 +4,16 @@ App de barra de menu para macOS que mostra ao vivo as câmeras IP (RTSP) da sua 
 
 Feito para câmeras genéricas (como as que usam o app Yoosee), que costumam ter um app de celular ruim e nenhum cliente para Mac.
 
+## Demonstração
+
+| Popover na barra de menu | Visão geral |
+|---|---|
+| ![Popover com a câmera ao vivo, abas e contador "2 ON"](docs/screenshots/popover.jpg) | ![Visão geral com duas câmeras ao vivo e telemetria](docs/screenshots/visao-geral.jpg) |
+
+| Janela expandida com controle PTZ | Configurações |
+|---|---|
+| ![Janela expandida com som, foto, HD/SD e direcional PTZ](docs/screenshots/janela-expandida.jpg) | ![Configuração da câmera com pré-visualização ao vivo](docs/screenshots/configuracoes.jpg) |
+
 ## Recursos
 
 - **Barra de menu:** ícone de câmera de segurança com o número de câmeras online (`N ON`) e popover nativo com seta.
