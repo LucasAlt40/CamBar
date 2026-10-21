@@ -1,36 +1,32 @@
 import SwiftUI
 import AppKit
 
-/// Reports whether the hosting window is currently on screen, so streams only run while the popover is open.
-struct WindowVisibility: NSViewRepresentable {
-    @Binding var visible: Bool
+/// Holds one view's claim on a camera stream (acquire/release plus the HD switch).
+final class StreamSession: ObservableObject {
+    @Published private(set) var stream: CameraStream?
+    private var cameraID: UUID?
+    private var hd = false
 
-    func makeNSView(context: Context) -> NSView {
-        let v = TrackingView()
-        v.onChange = { visible = $0 }
-        return v
+    func attach(_ camera: Camera, hd: Bool, store: CameraStore) {
+        guard stream == nil else { return }
+        self.hd = hd
+        cameraID = camera.id
+        stream = store.acquire(camera, hd: hd)
     }
-    func updateNSView(_ nsView: NSView, context: Context) {}
 
-    final class TrackingView: NSView {
-        var onChange: ((Bool) -> Void)?
-        private var observer: NSObjectProtocol?
+    func detach(store: CameraStore) {
+        guard stream != nil, let id = cameraID else { return }
+        store.release(id, hd: hd)
+        stream = nil
+        cameraID = nil
+    }
 
-        override func viewDidMoveToWindow() {
-            if let o = observer { NotificationCenter.default.removeObserver(o) }
-            guard let window else { onChange?(false); return }
-            onChange?(window.occlusionState.contains(.visible))
-            observer = NotificationCenter.default.addObserver(
-                forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main
-            ) { [weak self] _ in
-                self?.onChange?(window.occlusionState.contains(.visible))
-            }
-        }
+    func setHD(_ new: Bool, store: CameraStore) {
+        guard stream != nil, let id = cameraID, new != hd else { return }
+        hd = new
+        store.setHD(id, enabled: new)
     }
 }
-
-final class StreamHolder: ObservableObject { @Published var stream: CameraStream? }
-final class MenuState: ObservableObject { @Published var isOpen = false }
 
 /// Live picture + status overlay for one camera.
 struct LiveFeed: View {
@@ -38,31 +34,22 @@ struct LiveFeed: View {
     let camera: Camera
     var active: Bool = true
     var hd: Bool = false
-    @StateObject private var holder = StreamHolder()
-    private var stream: CameraStream? {
-        get { holder.stream }
-        nonmutating set { holder.stream = newValue }
-    }
+    @StateObject private var session = StreamSession()
 
     var body: some View {
         ZStack {
             Color.black
-            if let stream = holder.stream { FeedContent(stream: stream) }
+            if let stream = session.stream { FeedContent(stream: stream) }
         }
         .onAppear { update() }
         .onChange(of: active) { _, _ in update() }
-        .onChange(of: camera.id) { old, _ in
-            store.release(old, hd: hd); stream = nil; update()
-        }
-        .onDisappear { if stream != nil { store.release(camera.id, hd: hd); stream = nil } }
+        .onChange(of: hd) { _, new in session.setHD(new, store: store) }
+        .onChange(of: camera.id) { _, _ in session.detach(store: store); update() }
+        .onDisappear { session.detach(store: store) }
     }
 
     private func update() {
-        if active, stream == nil {
-            stream = store.acquire(camera, hd: hd)
-        } else if !active, stream != nil {
-            store.release(camera.id, hd: hd); stream = nil
-        }
+        if active { session.attach(camera, hd: hd, store: store) } else { session.detach(store: store) }
     }
 }
 
@@ -107,8 +94,9 @@ private struct StatusBadge: View {
     }
 }
 
-private struct FeedContent: View {
+struct FeedContent: View {
     @ObservedObject var stream: CameraStream
+    var showBadge = true
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -133,15 +121,13 @@ private struct FeedContent: View {
                 .padding(.horizontal, 28).padding(.top, 14)
             default: EmptyView()
             }
-            StatusBadge(status: stream.status).padding(10)
+            if showBadge { StatusBadge(status: stream.status).padding(10) }
         }
     }
 }
 
 struct MenuView: View {
     @EnvironmentObject var store: CameraStore
-    @Environment(\.openWindow) private var openWindow
-    @StateObject private var ui = MenuState()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -160,13 +146,7 @@ struct MenuView: View {
             footer
         }
         .frame(width: 400)
-        .background(Color.popover)
         .preferredColorScheme(.dark)
-        .background(WindowVisibility(visible: $ui.isOpen))
-        .onChange(of: ui.isOpen) { _, open in
-            store.panelOpen = open
-            if open { store.refreshOnline() }
-        }
     }
 
     private var header: some View {
@@ -198,7 +178,7 @@ struct MenuView: View {
     }
 
     private func preview(_ cam: Camera) -> some View {
-        LiveFeed(camera: cam, active: ui.isOpen)
+        LiveFeed(camera: cam, active: store.panelOpen)
             .frame(width: 372, height: 209)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.08), lineWidth: 0.5))
@@ -259,29 +239,15 @@ struct MenuView: View {
             }
             .toggleStyle(.switch).controlSize(.mini)
             .help("Mantém as câmeras conectadas com o painel fechado. Usa mais CPU e rede.")
+            Button { openOverview() } label: { Image(systemName: "square.grid.2x2") }
+                .buttonStyle(.plain).foregroundStyle(.secondary).help("Visão geral")
             Button { openManage() } label: { Image(systemName: "slider.horizontal.3") }
                 .buttonStyle(.plain).foregroundStyle(.secondary).help("Gerenciar câmeras")
         }
         .padding(.horizontal, 14).padding(.vertical, 11)
     }
 
-    private func openManage() {
-        NSApp.activate(ignoringOtherApps: true)
-        openWindow(id: "manage")
-    }
-
-    private func openViewer(_ cam: Camera) {
-        NSApp.activate(ignoringOtherApps: true)
-        openWindow(id: "viewer", value: cam.id)
-    }
-}
-
-struct ViewerView: View {
-    let camera: Camera
-
-    var body: some View {
-        LiveFeed(camera: camera, hd: true)
-            .frame(minWidth: 480, minHeight: 270)
-            .navigationTitle(camera.name)
-    }
+    private func openManage() { WindowManager.shared.openManage() }
+    private func openOverview() { WindowManager.shared.openOverview() }
+    private func openViewer(_ cam: Camera) { WindowManager.shared.openViewer(cam) }
 }

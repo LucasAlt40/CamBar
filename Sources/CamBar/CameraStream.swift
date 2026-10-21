@@ -1,11 +1,25 @@
 import AppKit
 import Foundation
+import ImageIO
 
 /// Decodes an RTSP stream by piping it through ffmpeg as MJPEG and splitting the JPEG frames.
 final class CameraStream: ObservableObject {
     struct Failure: Equatable { var title: String; var hint: String }
     enum Status: Equatable { case idle, connecting, live, failed(Failure) }
 
+    /// What the camera reports about its own stream (parsed from ffmpeg's log).
+    struct Info: Equatable {
+        var width = 0, height = 0
+        var fps = 0.0
+        var codec = ""
+        var hasAudio = false
+        var summary: String {
+            let fpsText = fps == fps.rounded() ? "\(Int(fps))" : String(format: "%.1f", fps)
+            return "\(width)×\(height) • \(fpsText) FPS" + (codec.isEmpty ? "" : " • \(codec)")
+        }
+    }
+
+    @Published var info: Info?
     @Published var frame: NSImage?
     @Published var status: Status = .idle
 
@@ -26,7 +40,8 @@ final class CameraStream: ObservableObject {
     enum Profile {
         case standby, normal, hd
         var width: Int { self == .hd ? 1280 : self == .normal ? 720 : 480 }
-        var fps: Int { self == .standby ? 2 : 15 }
+        /// Standby is throttled; otherwise frames pass through exactly as the camera sends them.
+        var rateArgs: [String] { self == .standby ? ["-r", "2"] : ["-fps_mode", "passthrough"] }
         var quality: Int { self == .hd ? 5 : self == .normal ? 7 : 8 }
     }
     var profile: Profile = .normal
@@ -57,7 +72,7 @@ final class CameraStream: ObservableObject {
         generation += 1
         process?.terminate()
         process = nil
-        if clearFrame { DispatchQueue.main.async { self.status = .idle; self.frame = nil } }
+        if clearFrame { DispatchQueue.main.async { self.status = .idle; self.frame = nil; self.info = nil } }
     }
 
     private func launch(url: String, transport: String?, gen: Int) {
@@ -76,7 +91,8 @@ final class CameraStream: ObservableObject {
             "-hwaccel", "videotoolbox",
         ] + transportArgs + [
             "-i", url, "-an",
-            "-vf", "scale='min(\(profile.width),iw)':-2", "-r", "\(profile.fps)",
+            "-vf", "scale='min(\(profile.width),iw)':-2",
+        ] + profile.rateArgs + [
             "-q:v", "\(profile.quality)", "-f", "mjpeg", "pipe:1",
         ]
         let out = Pipe(), err = Pipe()
@@ -94,7 +110,7 @@ final class CameraStream: ObservableObject {
                   let end = buffer.firstRange(of: Data([0xFF, 0xD9]), in: start.upperBound..<buffer.endIndex) {
                 let jpeg = buffer.subdata(in: start.lowerBound..<end.upperBound)
                 buffer.removeSubrange(buffer.startIndex..<end.upperBound)
-                if let img = NSImage(data: jpeg) { latest = img }
+                if let img = Self.decode(jpeg) { latest = img }
             }
             if buffer.count > 8_000_000 { buffer.removeAll() }
             if let img = latest {
@@ -110,6 +126,13 @@ final class CameraStream: ObservableObject {
             guard let s = String(data: d, encoding: .utf8), !s.isEmpty else { return }
             Self.appendLog(s)
             let lines = s.split(separator: "\n").map(String.init)
+            for line in lines where line.contains("Stream #0:") {
+                if line.contains("Video:"), !line.contains("mjpeg"), let v = Self.parseVideo(line) {
+                    DispatchQueue.main.async { var i = self?.info ?? Info(); i.width = v.width; i.height = v.height; i.fps = v.fps; i.codec = v.codec; self?.info = i }
+                } else if line.contains("Audio:") {
+                    DispatchQueue.main.async { var i = self?.info ?? Info(); i.hasAudio = true; self?.info = i }
+                }
+            }
             if let e = lines.last(where: { $0.contains("Error") || $0.contains("error") || $0.contains("RTSP/1.0 4") }) {
                 self?.lastError = e
             }
@@ -134,6 +157,32 @@ final class CameraStream: ObservableObject {
         } catch {
             DispatchQueue.main.async { self.status = .failed(Failure(title: "Não foi possível iniciar", hint: error.localizedDescription)) }
         }
+    }
+
+    /// Decodes on the reader thread so the main thread only has to draw.
+    private static func decode(_ data: Data) -> NSImage? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+              let cg = CGImageSourceCreateImageAtIndex(src, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+        else { return nil }
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+    }
+
+    private static func parseVideo(_ line: String) -> Info? {
+        func match(_ pattern: String) -> [String]? {
+            guard let re = try? NSRegularExpression(pattern: pattern),
+                  let m = re.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) else { return nil }
+            return (1..<m.numberOfRanges).map { i in
+                Range(m.range(at: i), in: line).map { String(line[$0]) } ?? ""
+            }
+        }
+        guard let size = match(#"\b(\d{3,5})x(\d{3,5})\b"#), let fps = match(#"(\d+(?:\.\d+)?) fps"#),
+              let w = Int(size[0]), let h = Int(size[1]), let f = Double(fps[0]) else { return nil }
+        var codec = ""
+        if let c = match(#"Video: ([a-z0-9]+)(?: \(([^)]*)\))?"#) {
+            let name = ["h264": "H.264", "hevc": "H.265"][c[0]] ?? c[0].uppercased()
+            codec = c[1].isEmpty ? name : "\(name) \(c[1])"
+        }
+        return Info(width: w, height: h, fps: f, codec: codec)
     }
 
     static let logURL = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]

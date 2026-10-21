@@ -25,15 +25,22 @@ final class ManageModel: ObservableObject {
 
 /// Makes the hosting window draggable from its background and blends the title bar into the content.
 struct WindowChrome: NSViewRepresentable {
+    /// When set, the window keeps this content aspect ratio while resizing (no letterbox bars).
+    var aspectRatio: NSSize?
+
     func makeNSView(context: Context) -> NSView {
         let v = ChromeView()
+        v.aspectRatio = aspectRatio
         return v
     }
     func updateNSView(_ nsView: NSView, context: Context) {}
 
     final class ChromeView: NSView {
+        var aspectRatio: NSSize?
+
         override func viewDidMoveToWindow() {
             guard let w = window else { return }
+            if let aspectRatio { w.contentAspectRatio = aspectRatio }
             w.isMovableByWindowBackground = true
             w.titlebarAppearsTransparent = true
             w.backgroundColor = NSColor(srgbRed: 0.059, green: 0.075, blue: 0.098, alpha: 1)
@@ -317,6 +324,10 @@ struct ManageView: View {
             }
             field("Caminho RTSP") {
                 TextField("/onvif1", text: $m.draft.path).fieldStyle(mono: true)
+            }
+            field("Porta ONVIF (PTZ)") {
+                TextField("automática", text: Binding(get: { m.draft.onvifPort.map(String.init) ?? "" },
+                                                      set: { m.draft.onvifPort = Int($0) })).fieldStyle(mono: true)
             }
             field("Usuário") {
                 TextField("Nome de usuário do feed", text: $m.draft.username).fieldStyle()

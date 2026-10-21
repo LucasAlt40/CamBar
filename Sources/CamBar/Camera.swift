@@ -9,7 +9,8 @@ struct Camera: Identifiable, Codable, Hashable {
     var port: Int = 554
     var path: String = "/"
     var username: String = ""
-    var transport: String?   // nil/"auto", "tcp" or "udp"
+    var transport: String?   // nil/"auto", "tcp", "udp" or "http"
+    var onvifPort: Int?      // nil = try the common ones
 
     func rtspURL(password: String) -> String {
         var auth = ""
@@ -176,6 +177,18 @@ final class CameraStore: ObservableObject {
     private func applyAllProfiles() {
         for (id, stream) in streams { if let cam = camera(id) { applyProfile(cam, stream: stream) } }
     }
+
+    /// Switches one viewer between the HD and the normal profile without releasing the stream.
+    func setHD(_ id: UUID, enabled: Bool) {
+        if enabled { hdCounts[id, default: 0] += 1 } else if let c = hdCounts[id], c > 0 { hdCounts[id] = c - 1 }
+        if let cam = camera(id), let st = streams[id] { applyProfile(cam, stream: st) }
+    }
+
+    func reconnect(_ camera: Camera) {
+        streams[camera.id]?.start(camera: camera, password: Keychain.password(for: camera.id))
+    }
+
+    func password(for id: UUID) -> String { Keychain.password(for: id) }
 
     func release(_ id: UUID, hd: Bool = false) {
         guard let n = refCounts[id], n > 0 else { return }
