@@ -52,7 +52,7 @@ No painel, o botão de expandir abre a janela da câmera, o ícone de grade abre
 | Campo | O que colocar |
 |---|---|
 | Nome | Como você quer chamar a câmera. |
-| IP da câmera | Endereço local, por exemplo `192.168.0.3`. |
+| IP da câmera | Endereço local, por exemplo `192.168.1.10`. |
 | Porta RTSP | Normalmente `554`. |
 | Caminho RTSP | O trecho depois da porta, por exemplo `/onvif1`. |
 | Porta ONVIF (PTZ) | Opcional. Se vazio, o app tenta `5000`, `80` e `8080`. |
@@ -125,25 +125,42 @@ O app mostra o motivo no lugar do vídeo. O ffmpeg grava o detalhe, com as crede
 
 ## Estrutura do projeto
 
+O pacote tem três alvos:
+
+- **`CamBarCore`**: lógica sem interface (modelos, comando do ffmpeg, leitura de MJPEG e do log, classificação de erros, ONVIF, Keychain, persistência). Não depende de AppKit nem SwiftUI.
+- **`CamBar`**: o app (AppKit + SwiftUI), que usa o `CamBarCore`.
+- **`CamBarChecks`**: verificações do `CamBarCore`. XCTest e Swift Testing exigem o Xcode completo, então elas rodam como executável:
+
+```bash
+swift run CamBarChecks
 ```
-Package.swift          Pacote Swift (executável macOS)
-build.sh               Compila e monta o CamBar.app
-Resources/AppIcon.icns Ícone do app
-scripts/make-icon.swift Gera o ícone
+
+```
+Sources/CamBarCore/
+  Models/Camera.swift              Câmera e transporte RTSP
+  Persistence/CameraRepository.swift  Onde a lista de câmeras é salva
+  Security/CredentialStore.swift   Senhas no Keychain
+  Network/Reachability.swift       Teste de conexão TCP
+  Logging/FileLog.swift            Log com credenciais mascaradas e tamanho limitado
+  Streaming/                       Perfis, comando do ffmpeg, MJPEG, telemetria e erros
+  Audio/PCMConverter.swift         Conversão do áudio
+  ONVIF/ONVIF.swift                Mensagens SOAP, WS-Security e cliente PTZ
 Sources/CamBar/
-  CamBarApp.swift      Ponto de entrada
-  AppDelegate.swift    Ícone na barra de menu, popover e gerenciador de janelas
-  Camera.swift         Modelo da câmera, Keychain, lista de câmeras e controle das conexões
-  CameraStream.swift   Processo ffmpeg, perfis de qualidade, telemetria e erros
-  AudioPlayer.swift    Reprodução do áudio da câmera
-  PTZController.swift  Controle de movimento por ONVIF
-  Views.swift          Popover e componentes de vídeo
-  ViewerView.swift     Janela expandida
-  OverviewView.swift   Visão geral em grade
-  ManageView.swift     Janela de configuração
-  StatusBarImage.swift Item da barra de menu (ícone, N ON e ponto de status)
-  CameraIcon.swift     Ícone cctv
+  App/                             Entrada, ambiente de dependências, item da barra de menu, janelas
+  Stores/                          Lista de câmeras e status online
+  Streaming/                       Processo ffmpeg, stream de uma câmera e pool compartilhado
+  Services/                        Áudio, PTZ e fotos
+  Views/                           Tema, vídeo, popover, janela expandida, visão geral e configurações
+Sources/CamBarChecks/main.swift    Verificações
 ```
+
+### Arquitetura
+
+- **Injeção de dependências:** `AppEnvironment` cria os serviços uma vez e os entrega às views (`environmentObject` e um `WindowRouting` no environment).
+- **Pool com empréstimo (lease):** cada view que mostra uma câmera pega um `StreamLease` do `StreamPool`, que mantém um único ffmpeg por câmera e escolhe o perfil (espera, normal ou HD) conforme quem está olhando.
+- **MVVM:** a janela expandida e as configurações têm view models próprios; as views só desenham.
+- **Concorrência:** estado da interface no `@MainActor`; leitura e decodificação dos quadros fora da thread principal.
+- **Protocolos:** repositório, credenciais e teste de conexão são protocolos, com versões em memória para as verificações.
 
 Para regenerar o ícone:
 
