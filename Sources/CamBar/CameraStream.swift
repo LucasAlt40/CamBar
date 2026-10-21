@@ -11,6 +11,25 @@ final class CameraStream: ObservableObject {
 
     private var process: Process?
     private var wanted = false
+    private let viewersLock = NSLock()
+    private var _viewers = 0
+
+    /// Number of views showing this stream.
+    var viewers: Int {
+        get { viewersLock.lock(); defer { viewersLock.unlock() }; return _viewers }
+        set { viewersLock.lock(); _viewers = newValue; viewersLock.unlock() }
+    }
+    var isActive: Bool { wanted }
+
+    /// Resolution/frame-rate presets. The camera itself sends 15 fps, so `normal` and `hd` use all of it;
+    /// `standby` keeps the connection alive cheaply while nobody is looking.
+    enum Profile {
+        case standby, normal, hd
+        var width: Int { self == .hd ? 1280 : self == .normal ? 720 : 480 }
+        var fps: Int { self == .standby ? 2 : 15 }
+        var quality: Int { self == .hd ? 5 : self == .normal ? 7 : 8 }
+    }
+    var profile: Profile = .normal
     private var generation = 0
     private var lastError = ""
 
@@ -20,8 +39,8 @@ final class CameraStream: ObservableObject {
         }
     }
 
-    func start(camera: Camera, password: String) {
-        stop()
+    func start(camera: Camera, password: String, keepFrame: Bool = false) {
+        stop(clearFrame: !keepFrame)
         Self.resetLog()
         wanted = true
         generation += 1
@@ -33,12 +52,12 @@ final class CameraStream: ObservableObject {
         start(camera: camera, password: password)
     }
 
-    func stop() {
+    func stop(clearFrame: Bool = true) {
         wanted = false
         generation += 1
         process?.terminate()
         process = nil
-        DispatchQueue.main.async { self.status = .idle; self.frame = nil }
+        if clearFrame { DispatchQueue.main.async { self.status = .idle; self.frame = nil } }
     }
 
     private func launch(url: String, transport: String?, gen: Int) {
@@ -54,9 +73,11 @@ final class CameraStream: ObservableObject {
         if let t = transport, ["tcp", "udp", "http"].contains(t) { transportArgs = ["-rtsp_transport", t] }
         p.arguments = [
             "-loglevel", "verbose", "-fflags", "nobuffer", "-flags", "low_delay",
+            "-hwaccel", "videotoolbox",
         ] + transportArgs + [
             "-i", url, "-an",
-            "-vf", "scale='min(1280,iw)':-2", "-r", "12", "-q:v", "6", "-f", "mjpeg", "pipe:1",
+            "-vf", "scale='min(\(profile.width),iw)':-2", "-r", "\(profile.fps)",
+            "-q:v", "\(profile.quality)", "-f", "mjpeg", "pipe:1",
         ]
         let out = Pipe(), err = Pipe()
         p.standardOutput = out
@@ -66,7 +87,7 @@ final class CameraStream: ObservableObject {
         var buffer = Data()
         out.fileHandleForReading.readabilityHandler = { [weak self] h in
             let chunk = h.availableData
-            guard !chunk.isEmpty else { return }
+            guard let self, !chunk.isEmpty else { return }
             buffer.append(chunk)
             var latest: NSImage?
             while let start = buffer.firstRange(of: Data([0xFF, 0xD8])),
@@ -78,7 +99,7 @@ final class CameraStream: ObservableObject {
             if buffer.count > 8_000_000 { buffer.removeAll() }
             if let img = latest {
                 DispatchQueue.main.async {
-                    guard let self, self.generation == gen else { return }
+                    guard self.generation == gen else { return }
                     self.frame = img
                     self.status = .live
                 }
@@ -101,6 +122,8 @@ final class CameraStream: ObservableObject {
                 self.status = .failed(self.friendlyError(self.lastError))
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
                     guard self.wanted, self.generation == gen else { return }
+                    // nobody is watching a failing camera: stop retrying until a view asks for it again
+                    if self.viewers == 0 { self.wanted = false; return }
                     self.launch(url: url, transport: transport, gen: gen)
                 }
             }

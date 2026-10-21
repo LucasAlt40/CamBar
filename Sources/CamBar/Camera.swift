@@ -58,7 +58,27 @@ final class CameraStore: ObservableObject {
     @Published var cameras: [Camera] = [] { didSet { save() } }
     @Published var selectedID: UUID?
     @Published var online: Set<UUID> = []
+    /// Keep streams connected after the popover closes (costs CPU and network).
+    @Published var keepConnected: Bool = true {
+        didSet {
+            UserDefaults.standard.set(keepConnected, forKey: "keepConnected")
+            if keepConnected {
+                pendingStops.values.forEach { $0.cancel() }
+                pendingStops.removeAll()
+            } else {
+                for (id, n) in refCounts where n == 0 { scheduleStop(id) }
+            }
+            applyAllProfiles()
+        }
+    }
+    /// True while the menu bar popover is on screen: every connected camera runs at normal quality so tab switches are instant.
+    @Published var panelOpen = false {
+        didSet { applyAllProfiles() }
+    }
     private var monitor: Timer?
+    private var pendingStops: [UUID: DispatchWorkItem] = [:]
+    private var hdCounts: [UUID: Int] = [:]
+    private let idleGrace: TimeInterval = 60
 
     private var streams: [UUID: CameraStream] = [:]
     private var refCounts: [UUID: Int] = [:]
@@ -70,6 +90,7 @@ final class CameraStore: ObservableObject {
             cameras = decoded
         }
         selectedID = cameras.first?.id
+        keepConnected = UserDefaults.standard.object(forKey: "keepConnected") as? Bool ?? true
         refreshOnline()
         monitor = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
             self?.refreshOnline()
@@ -113,28 +134,67 @@ final class CameraStore: ObservableObject {
         streams[camera.id]?.stop()
         streams[camera.id] = nil
         refCounts[camera.id] = nil
+        hdCounts[camera.id] = nil
         Keychain.setPassword("", for: camera.id)
         cameras.removeAll { $0.id == camera.id }
         if selectedID == camera.id { selectedID = cameras.first?.id }
         refreshOnline()
     }
 
-    /// Streams are shared between the menu bar preview and the expanded window,
-    /// and run only while at least one view holds them.
-    func acquire(_ camera: Camera) -> CameraStream {
+    /// Streams are shared between the menu bar preview and the expanded window. Once connected they
+    /// stay up while viewed, and afterwards either indefinitely (keepConnected) or for `idleGrace` seconds.
+    func acquire(_ camera: Camera, hd: Bool = false) -> CameraStream {
         let stream = streams[camera.id] ?? CameraStream()
         streams[camera.id] = stream
+        pendingStops[camera.id]?.cancel()
+        pendingStops[camera.id] = nil
         refCounts[camera.id, default: 0] += 1
-        if refCounts[camera.id] == 1 {
+        stream.viewers = refCounts[camera.id] ?? 0
+        if hd { hdCounts[camera.id, default: 0] += 1 }
+        applyProfile(camera, stream: stream)
+        if !stream.isActive {
             stream.start(camera: camera, password: Keychain.password(for: camera.id))
         }
         return stream
     }
 
-    func release(_ id: UUID) {
+    private func profile(for id: UUID) -> CameraStream.Profile {
+        if (hdCounts[id] ?? 0) > 0 { return .hd }
+        if panelOpen || (refCounts[id] ?? 0) > 0 || !keepConnected { return .normal }
+        return .standby
+    }
+
+    private func applyProfile(_ camera: Camera, stream: CameraStream) {
+        let want = profile(for: camera.id)
+        guard stream.profile != want else { return }
+        stream.profile = want
+        if stream.isActive {
+            stream.start(camera: camera, password: Keychain.password(for: camera.id), keepFrame: true)
+        }
+    }
+
+    private func applyAllProfiles() {
+        for (id, stream) in streams { if let cam = camera(id) { applyProfile(cam, stream: stream) } }
+    }
+
+    func release(_ id: UUID, hd: Bool = false) {
         guard let n = refCounts[id], n > 0 else { return }
         refCounts[id] = n - 1
-        if n - 1 == 0 { streams[id]?.stop() }
+        streams[id]?.viewers = n - 1
+        if hd, let c = hdCounts[id], c > 0 { hdCounts[id] = c - 1 }
+        if let cam = camera(id), let st = streams[id] { applyProfile(cam, stream: st) }
+        if n - 1 == 0 && !keepConnected { scheduleStop(id) }
+    }
+
+    private func scheduleStop(_ id: UUID) {
+        pendingStops[id]?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, (self.refCounts[id] ?? 0) == 0 else { return }
+            self.streams[id]?.stop()
+            self.pendingStops[id] = nil
+        }
+        pendingStops[id] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + idleGrace, execute: work)
     }
 }
 

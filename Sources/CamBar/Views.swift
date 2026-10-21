@@ -37,6 +37,7 @@ struct LiveFeed: View {
     @EnvironmentObject var store: CameraStore
     let camera: Camera
     var active: Bool = true
+    var hd: Bool = false
     @StateObject private var holder = StreamHolder()
     private var stream: CameraStream? {
         get { holder.stream }
@@ -51,16 +52,16 @@ struct LiveFeed: View {
         .onAppear { update() }
         .onChange(of: active) { _, _ in update() }
         .onChange(of: camera.id) { old, _ in
-            store.release(old); stream = nil; update()
+            store.release(old, hd: hd); stream = nil; update()
         }
-        .onDisappear { if stream != nil { store.release(camera.id); stream = nil } }
+        .onDisappear { if stream != nil { store.release(camera.id, hd: hd); stream = nil } }
     }
 
     private func update() {
         if active, stream == nil {
-            stream = store.acquire(camera)
+            stream = store.acquire(camera, hd: hd)
         } else if !active, stream != nil {
-            store.release(camera.id); stream = nil
+            store.release(camera.id, hd: hd); stream = nil
         }
     }
 }
@@ -162,7 +163,10 @@ struct MenuView: View {
         .background(Color.popover)
         .preferredColorScheme(.dark)
         .background(WindowVisibility(visible: $ui.isOpen))
-        .onChange(of: ui.isOpen) { _, open in if open { store.refreshOnline() } }
+        .onChange(of: ui.isOpen) { _, open in
+            store.panelOpen = open
+            if open { store.refreshOnline() }
+        }
     }
 
     private var header: some View {
@@ -250,6 +254,11 @@ struct MenuView: View {
             Text("\(store.online.count) de \(store.cameras.count) online")
                 .font(.system(size: 12, weight: .medium))
             Spacer()
+            Toggle(isOn: $store.keepConnected) {
+                Text("Sempre ativo").font(.system(size: 11)).foregroundStyle(.white.opacity(0.6))
+            }
+            .toggleStyle(.switch).controlSize(.mini)
+            .help("Mantém as câmeras conectadas com o painel fechado. Usa mais CPU e rede.")
             Button { openManage() } label: { Image(systemName: "slider.horizontal.3") }
                 .buttonStyle(.plain).foregroundStyle(.secondary).help("Gerenciar câmeras")
         }
@@ -271,7 +280,7 @@ struct ViewerView: View {
     let camera: Camera
 
     var body: some View {
-        LiveFeed(camera: camera)
+        LiveFeed(camera: camera, hd: true)
             .frame(minWidth: 480, minHeight: 270)
             .navigationTitle(camera.name)
     }
