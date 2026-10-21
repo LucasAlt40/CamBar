@@ -1,0 +1,147 @@
+import AppKit
+import Foundation
+
+/// Decodes an RTSP stream by piping it through ffmpeg as MJPEG and splitting the JPEG frames.
+final class CameraStream: ObservableObject {
+    struct Failure: Equatable { var title: String; var hint: String }
+    enum Status: Equatable { case idle, connecting, live, failed(Failure) }
+
+    @Published var frame: NSImage?
+    @Published var status: Status = .idle
+
+    private var process: Process?
+    private var wanted = false
+    private var generation = 0
+    private var lastError = ""
+
+    static var ffmpegPath: String? {
+        ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"].first {
+            FileManager.default.isExecutableFile(atPath: $0)
+        }
+    }
+
+    func start(camera: Camera, password: String) {
+        stop()
+        Self.resetLog()
+        wanted = true
+        generation += 1
+        launch(url: camera.rtspURL(password: password), transport: camera.transport, gen: generation)
+    }
+
+    func restart(camera: Camera, password: String) {
+        guard wanted else { return }
+        start(camera: camera, password: password)
+    }
+
+    func stop() {
+        wanted = false
+        generation += 1
+        process?.terminate()
+        process = nil
+        DispatchQueue.main.async { self.status = .idle; self.frame = nil }
+    }
+
+    private func launch(url: String, transport: String?, gen: Int) {
+        guard let ffmpeg = Self.ffmpegPath else {
+            DispatchQueue.main.async { self.status = .failed(Failure(title: "ffmpeg não encontrado", hint: "Instale com: brew install ffmpeg")) }
+            return
+        }
+        DispatchQueue.main.async { self.status = .connecting }
+
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: ffmpeg)
+        var transportArgs: [String] = []
+        if let t = transport, ["tcp", "udp", "http"].contains(t) { transportArgs = ["-rtsp_transport", t] }
+        p.arguments = [
+            "-loglevel", "verbose", "-fflags", "nobuffer", "-flags", "low_delay",
+        ] + transportArgs + [
+            "-i", url, "-an",
+            "-vf", "scale='min(1280,iw)':-2", "-r", "12", "-q:v", "6", "-f", "mjpeg", "pipe:1",
+        ]
+        let out = Pipe(), err = Pipe()
+        p.standardOutput = out
+        p.standardError = err
+        lastError = ""
+
+        var buffer = Data()
+        out.fileHandleForReading.readabilityHandler = { [weak self] h in
+            let chunk = h.availableData
+            guard !chunk.isEmpty else { return }
+            buffer.append(chunk)
+            var latest: NSImage?
+            while let start = buffer.firstRange(of: Data([0xFF, 0xD8])),
+                  let end = buffer.firstRange(of: Data([0xFF, 0xD9]), in: start.upperBound..<buffer.endIndex) {
+                let jpeg = buffer.subdata(in: start.lowerBound..<end.upperBound)
+                buffer.removeSubrange(buffer.startIndex..<end.upperBound)
+                if let img = NSImage(data: jpeg) { latest = img }
+            }
+            if buffer.count > 8_000_000 { buffer.removeAll() }
+            if let img = latest {
+                DispatchQueue.main.async {
+                    guard let self, self.generation == gen else { return }
+                    self.frame = img
+                    self.status = .live
+                }
+            }
+        }
+        err.fileHandleForReading.readabilityHandler = { [weak self] h in
+            let d = h.availableData
+            guard let s = String(data: d, encoding: .utf8), !s.isEmpty else { return }
+            Self.appendLog(s)
+            let lines = s.split(separator: "\n").map(String.init)
+            if let e = lines.last(where: { $0.contains("Error") || $0.contains("error") || $0.contains("RTSP/1.0 4") }) {
+                self?.lastError = e
+            }
+        }
+        p.terminationHandler = { [weak self] _ in
+            out.fileHandleForReading.readabilityHandler = nil
+            err.fileHandleForReading.readabilityHandler = nil
+            DispatchQueue.main.async {
+                guard let self, self.wanted, self.generation == gen else { return }
+                self.status = .failed(self.friendlyError(self.lastError))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                    guard self.wanted, self.generation == gen else { return }
+                    self.launch(url: url, transport: transport, gen: gen)
+                }
+            }
+        }
+        do {
+            try p.run()
+            process = p
+        } catch {
+            DispatchQueue.main.async { self.status = .failed(Failure(title: "Não foi possível iniciar", hint: error.localizedDescription)) }
+        }
+    }
+
+    static let logURL = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("Logs/CamBar.log")
+
+    private static func resetLog() {
+        try? FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? Data().write(to: logURL)
+    }
+
+    /// Appends ffmpeg output to the log with any rtsp credentials masked.
+    private static func appendLog(_ text: String) {
+        let masked = text.replacingOccurrences(of: "://[^/@\\s]*@", with: "://***@", options: .regularExpression)
+        guard let data = masked.data(using: .utf8), let h = try? FileHandle(forWritingTo: logURL) else { return }
+        h.seekToEndOfFile(); h.write(data); try? h.close()
+    }
+
+    private func friendlyError(_ raw: String) -> Failure {
+        let s = raw.lowercased()
+        if s.contains("401") || s.contains("403") || s.contains("unauthorized") || s.contains("forbidden") {
+            return Failure(title: "Usuário ou senha incorretos", hint: "Confira as credenciais em Gerenciar câmeras.")
+        }
+        if s.contains("404") || s.contains("not found") {
+            return Failure(title: "Caminho RTSP não encontrado", hint: "Verifique o caminho do stream, por exemplo /onvif1.")
+        }
+        if s.contains("405") || s.contains("not one of 40") || s.contains("method not allowed") {
+            return Failure(title: "A câmera não aceitou o RTSP", hint: "A porta responde, mas não fala RTSP. Ative RTSP/ONVIF no app da câmera.")
+        }
+        if s.contains("refused") || s.contains("timed out") || s.contains("unreachable") || s.contains("no route") {
+            return Failure(title: "Câmera inacessível", hint: "Confira o IP e se ela está ligada e na mesma rede.")
+        }
+        return Failure(title: "Sem sinal", hint: "Detalhes em ~/Library/Logs/CamBar.log")
+    }
+}
