@@ -112,7 +112,7 @@ private struct TileContent: View {
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
                 Spacer()
-                if let info = stream.info, stream.status == .live {
+                if let info = stream.info, info.hasVideo, stream.status == .live {
                     Text("\(info.fpsText) FPS").font(.system(size: 10.5, design: .monospaced)).foregroundStyle(Palette.accent)
                 }
                 StatusChip(status: stream.status)
@@ -143,7 +143,7 @@ private struct TileContent: View {
             ZStack(alignment: .bottom) {
                 if let frame = stream.frame { Image(nsImage: frame).resizable().scaledToFit() }
                 HStack {
-                    if let info = stream.info {
+                    if let info = stream.info, info.hasVideo {
                         OverlayTag(text: info.resolution + (info.codec.isEmpty ? "" : " • \(info.codec)"))
                     }
                     Spacer()

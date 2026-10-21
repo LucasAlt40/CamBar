@@ -112,6 +112,7 @@ final class CameraStream: ObservableObject {
     private func processExited(_ run: FFmpegProcess?) {
         guard run != nil, run === process, isRunning else { return }
         process = nil
+        logParser.finish()
         status = .failed(StreamFailure.classify(logParser.lastError))
         scheduleRetry()
     }

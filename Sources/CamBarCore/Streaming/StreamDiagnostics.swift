@@ -16,6 +16,9 @@ package struct StreamInfo: Equatable, Sendable {
         self.hasAudio = hasAudio
     }
 
+    /// The audio line can arrive before the video one; until then there is no picture size.
+    package var hasVideo: Bool { width > 0 && height > 0 }
+
     package var resolution: String { "\(width)×\(height)" }
 
     package var fpsText: String {
@@ -80,39 +83,48 @@ package enum StreamFailure: Equatable, Sendable {
 }
 
 /// Reads ffmpeg's stderr incrementally: stream telemetry plus the latest error line.
+/// Pipe reads can split a line in two, so an unfinished line waits for the next chunk.
 package struct FFmpegLogParser {
     package private(set) var info: StreamInfo?
     package private(set) var lastError = ""
+    private var pending = ""
 
     package init() {}
 
     /// Consumes a chunk of log text. Returns `true` when `info` changed.
     @discardableResult
     package mutating func consume(_ text: String) -> Bool {
-        var changed = false
-        for raw in text.split(separator: "\n") {
-            let line = String(raw)
-            if line.contains("Stream #0:") {
-                if line.contains("Video:"), !line.contains("mjpeg"), let video = Self.parseVideo(line) {
-                    var updated = info ?? StreamInfo()
-                    updated.width = video.width
-                    updated.height = video.height
-                    updated.fps = video.fps
-                    updated.codec = video.codec
-                    changed = changed || updated != info
-                    info = updated
-                } else if line.contains("Audio:"), info?.hasAudio != true {
-                    var updated = info ?? StreamInfo()
-                    updated.hasAudio = true
-                    info = updated
-                    changed = true
-                }
-            }
-            if line.localizedCaseInsensitiveContains("error") || line.contains("RTSP/1.0 4") {
-                lastError = line
-            }
+        var lines = (pending + text).components(separatedBy: "\n")
+        pending = lines.removeLast()   // empty when the chunk ended with a newline
+        return lines.reduce(false) { changed, line in handle(line) || changed }
+    }
+
+    /// Processes a trailing line that never got its newline (call when ffmpeg exits).
+    @discardableResult
+    package mutating func finish() -> Bool {
+        defer { pending = "" }
+        return pending.isEmpty ? false : handle(pending)
+    }
+
+    private mutating func handle(_ line: String) -> Bool {
+        if line.localizedCaseInsensitiveContains("error") || line.contains("RTSP/1.0 4") {
+            lastError = line
         }
-        return changed
+        guard line.contains("Stream #0:") else { return false }
+        var updated = info ?? StreamInfo()
+        if line.contains("Video:"), !line.contains("mjpeg"), let video = Self.parseVideo(line) {
+            updated.width = video.width
+            updated.height = video.height
+            updated.fps = video.fps
+            updated.codec = video.codec
+        } else if line.contains("Audio:") {
+            updated.hasAudio = true
+        } else {
+            return false
+        }
+        guard updated != info else { return false }
+        info = updated
+        return true
     }
 
     // MARK: Parsing

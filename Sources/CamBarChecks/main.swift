@@ -82,7 +82,14 @@ suite("Log do ffmpeg") {
     let hevc = FFmpegLogParser.parseVideo("Stream #0:0: Video: hevc (Main), yuv420p(tv), 1920x1080, 15 fps, 15 tbr")
     check(hevc?.codec == "H.265 Main" && hevc?.width == 1920, "H.265")
 
+    var split = FFmpegLogParser()
+    split.consume("  Stream #0:1: Audio: pcm_alaw, 16000 Hz, mono\n  Stream #0:0: Video: hevc (Main), yuv420p(tv), 19")
+    check(split.info?.hasVideo == false, "linha cortada ainda não conta")
+    split.consume("20x1080, 15 fps, 15 tbr\n")
+    check(split.info?.resolution == "1920×1080" && split.info?.hasAudio == true, "junta linha dividida em dois pedaços")
+
     parser.consume("Error opening input files: Server returned 400 Bad Request")
+    parser.finish()
     check(StreamFailure.classify(parser.lastError) == .badRequest, "guarda a última linha de erro")
 }
 

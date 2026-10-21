@@ -177,7 +177,7 @@ struct TelemetryChip: View {
     @ObservedObject var stream: CameraStream
 
     var body: some View {
-        if let info = stream.info {
+        if let info = stream.info, info.hasVideo {
             Text(info.summary)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Palette.accent)
