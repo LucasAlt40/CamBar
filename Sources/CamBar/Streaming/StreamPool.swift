@@ -1,6 +1,6 @@
+import AppKit
 import CamBarCore
 import Combine
-import Foundation
 
 /// Shares one stream per camera between every view that shows it (lease pattern) and decides its profile:
 /// HD while an expanded window wants it, normal while visible, standby (keyframes only) when nobody looks.
@@ -18,6 +18,11 @@ final class StreamPool: ObservableObject {
 
     /// While the popover is open every connected camera runs at normal quality, so tab switches are instant.
     @Published var panelOpen = false {
+        didSet { reevaluateAll() }
+    }
+
+    /// With the displays asleep nobody can see a frame, so every stream drops to standby (still connected).
+    private var displaysAsleep = false {
         didSet { reevaluateAll() }
     }
 
@@ -40,7 +45,7 @@ final class StreamPool: ObservableObject {
     private let defaults: UserDefaults
     private let log: FileLog?
     private let idleGrace: Duration
-    private var subscription: AnyCancellable?
+    private var subscriptions: Set<AnyCancellable> = []
 
     init(store: CameraStore, credentials: CredentialStore, defaults: UserDefaults = .standard,
          log: FileLog?, idleGrace: Duration = .seconds(60)) {
@@ -49,7 +54,12 @@ final class StreamPool: ObservableObject {
         self.log = log
         self.idleGrace = idleGrace
         keepConnected = defaults.object(forKey: Keys.keepConnected) as? Bool ?? true
-        subscription = store.changes.sink { [weak self] change in self?.apply(change) }
+        store.changes.sink { [weak self] change in self?.apply(change) }.store(in: &subscriptions)
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.publisher(for: NSWorkspace.screensDidSleepNotification)
+            .sink { [weak self] _ in self?.displaysAsleep = true }.store(in: &subscriptions)
+        workspace.publisher(for: NSWorkspace.screensDidWakeNotification)
+            .sink { [weak self] _ in self?.displaysAsleep = false }.store(in: &subscriptions)
     }
 
     // MARK: Leases
@@ -107,7 +117,8 @@ final class StreamPool: ObservableObject {
         case .updated(let camera):
             guard let entry = entries[camera.id] else { return }
             entry.camera = camera
-            if entry.stream.isRunning { start(entry) }
+            // a watched stream that gave up (e.g. launch failed) gets another chance with the new settings
+            if entry.stream.isRunning || entry.leases > 0 { start(entry) }
         case .removed(let id):
             entries[id]?.idleStop?.cancel()
             entries[id]?.stream.stop()
@@ -116,6 +127,7 @@ final class StreamPool: ObservableObject {
     }
 
     private func profile(for entry: Entry) -> StreamProfile {
+        if displaysAsleep { return .standby }
         if entry.hdLeases > 0 { return .hd }
         if panelOpen || entry.leases > 0 || !keepConnected { return .normal }
         return .standby

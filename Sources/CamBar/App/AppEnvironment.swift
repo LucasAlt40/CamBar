@@ -8,6 +8,7 @@ final class AppEnvironment {
     let pool: StreamPool
     let reachability: ReachabilityMonitor
     let checker: ReachabilityChecking
+    let pins: PinController
     let ptzLog: FileLog
 
     init(repository: CameraRepository, credentials: CredentialStore, checker: ReachabilityChecking,
@@ -15,6 +16,7 @@ final class AppEnvironment {
         store = CameraStore(repository: repository, credentials: credentials)
         pool = StreamPool(store: store, credentials: credentials, defaults: defaults, log: streamLog)
         reachability = ReachabilityMonitor(store: store, checker: checker)
+        pins = PinController(store: store, pool: pool, defaults: defaults)
         self.checker = checker
         self.ptzLog = ptzLog
     }
@@ -36,6 +38,7 @@ extension View {
             .environmentObject(environment.store)
             .environmentObject(environment.pool)
             .environmentObject(environment.reachability)
+            .environmentObject(environment.pins)
             .environment(\.windowRouter, router)
     }
 }

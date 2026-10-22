@@ -21,6 +21,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let environment = AppEnvironment.live()
         let router = WindowRouter(environment: environment)
         statusItem = StatusItemController(environment: environment, router: router)
+        environment.pins.router = router
+        environment.pins.restore()
         environment.reachability.start()
         self.environment = environment
         self.router = router

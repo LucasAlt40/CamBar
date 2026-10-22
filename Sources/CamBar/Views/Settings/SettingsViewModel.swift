@@ -26,7 +26,7 @@ final class SettingsViewModel: ObservableObject {
         self.checker = checker
     }
 
-    var canSave: Bool { !draft.name.isEmpty && !draft.host.isEmpty }
+    var canSave: Bool { !draft.name.trimmed.isEmpty && !draft.host.trimmed.isEmpty }
 
     /// The saved camera being edited (nil while creating a new one).
     var savedCamera: Camera? { isNew ? nil : store.camera(selectedID) }
@@ -38,9 +38,11 @@ final class SettingsViewModel: ObservableObject {
     }
 
     func filtered(_ cameras: [Camera]) -> [Camera] {
-        let query = search.trimmingCharacters(in: .whitespaces).lowercased()
+        let query = search.trimmed
         guard !query.isEmpty else { return cameras }
-        return cameras.filter { $0.name.lowercased().contains(query) || $0.host.contains(query) }
+        return cameras.filter {
+            $0.name.localizedCaseInsensitiveContains(query) || $0.host.localizedCaseInsensitiveContains(query)
+        }
     }
 
     // MARK: Actions
@@ -72,6 +74,11 @@ final class SettingsViewModel: ObservableObject {
 
     func save() {
         guard canSave else { return }
+        // a stray space in the host or path (common when pasting) breaks the RTSP URL
+        draft.name = draft.name.trimmed
+        draft.host = draft.host.trimmed
+        draft.path = draft.path.trimmed
+        draft.username = draft.username.trimmed
         store.save(draft, password: password)
         isNew = false
         selectedID = draft.id
@@ -106,4 +113,8 @@ final class SettingsViewModel: ObservableObject {
         testTask?.cancel()
         signalTest = .idle
     }
+}
+
+private extension String {
+    var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
 }

@@ -64,17 +64,25 @@ struct MenuView: View {
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.08), lineWidth: 0.5))
             .overlay(alignment: .topTrailing) {
-                Button { router?.showViewer(for: camera) } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .frame(width: 24, height: 24)
-                        .background(.black.opacity(0.55), in: Circle())
-                        .overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 0.5))
+                HStack(spacing: 6) {
+                    PinMenu(camera: camera) { previewIcon("pin.fill") }
+                    Button { router?.showViewer(for: camera) } label: {
+                        previewIcon("arrow.up.left.and.arrow.down.right")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Abrir em janela")
                 }
-                .buttonStyle(.plain)
                 .padding(10)
-                .help("Abrir em janela")
             }
+    }
+
+    private func previewIcon(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 24, height: 24)
+            .background(.black.opacity(0.55), in: Circle())
+            .overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 0.5))
     }
 
     private var tabs: some View {

@@ -1,10 +1,12 @@
 import CamBarCore
+import Combine
 import Foundation
 
 /// State and actions of the expanded camera window.
 @MainActor
 final class ViewerViewModel: ObservableObject {
-    let camera: Camera
+    /// Follows edits made in settings while the window is open (name, host, credentials).
+    @Published private(set) var camera: Camera
     let session = StreamSession()
     let audio = AudioPlayer()
     let ptz: PTZController
@@ -18,12 +20,19 @@ final class ViewerViewModel: ObservableObject {
     private let store: CameraStore
     private let pool: StreamPool
     private var toastTask: Task<Void, Never>?
+    private var subscription: AnyCancellable?
 
     init(camera: Camera, store: CameraStore, pool: StreamPool, ptzLog: FileLog?) {
         self.camera = camera
         self.store = store
         self.pool = pool
         ptz = PTZController(log: ptzLog)
+        subscription = store.changes.sink { [weak self] change in
+            guard let self, case .updated(let updated) = change, updated.id == self.camera.id else { return }
+            self.camera = updated
+            // audio runs its own ffmpeg with the old address and credentials
+            self.audio.stop()
+        }
     }
 
     func appear() {

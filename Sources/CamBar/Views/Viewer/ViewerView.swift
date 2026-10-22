@@ -50,13 +50,9 @@ private struct ViewerScreen: View {
             if let stream = session.stream { TelemetryChip(stream: stream) }
             Spacer()
             qualityPicker
+            PinMenu(camera: model.camera) { headerIcon("pin.fill") }
             Button { NSApp.keyWindow?.toggleFullScreen(nil) } label: {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.8))
-                    .frame(width: 30, height: 28)
-                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Palette.hairline, lineWidth: 0.5))
+                headerIcon("arrow.up.left.and.arrow.down.right")
             }
             .buttonStyle(.plain)
             .help("Tela cheia")
@@ -68,6 +64,15 @@ private struct ViewerScreen: View {
             LinearGradient(colors: [.black.opacity(0.75), .clear], startPoint: .top, endPoint: .bottom)
                 .frame(height: 70)
         }
+    }
+
+    private func headerIcon(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.8))
+            .frame(width: 30, height: 28)
+            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Palette.hairline, lineWidth: 0.5))
     }
 
     private var qualityPicker: some View {

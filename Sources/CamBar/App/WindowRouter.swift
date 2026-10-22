@@ -1,5 +1,6 @@
 import AppKit
 import CamBarCore
+import Combine
 import SwiftUI
 
 /// Navigation between the app's windows, injected into views through the environment.
@@ -31,10 +32,17 @@ final class WindowRouter: NSObject, WindowRouting, NSWindowDelegate {
 
     private let environment: AppEnvironment
     private var windows: [Destination: NSWindow] = [:]
+    private var subscription: AnyCancellable?
 
     init(environment: AppEnvironment) {
         self.environment = environment
         super.init()
+        subscription = environment.store.changes.sink { [weak self] change in
+            switch change {
+            case .updated(let camera): self?.windows[.viewer(camera.id)]?.title = camera.name
+            case .removed(let id): self?.windows[.viewer(id)]?.close()   // its stream is gone
+            }
+        }
     }
 
     func showViewer(for camera: Camera) {

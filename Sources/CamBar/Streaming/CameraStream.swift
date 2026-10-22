@@ -81,7 +81,8 @@ final class CameraStream: ObservableObject {
             Task { @MainActor in self?.receive(image, from: run) }
         }
         handlers.log = { [weak self, weak run] text in
-            log?.append(text, tag: tag)
+            let kept = text.split(separator: "\n").filter { !FFmpeg.isNoise($0) }
+            if !kept.isEmpty { log?.append(kept.joined(separator: "\n"), tag: tag) }
             Task { @MainActor in self?.receiveLog(text, from: run) }
         }
         handlers.exit = { [weak self, weak run] in

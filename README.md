@@ -20,6 +20,7 @@ Feito para câmeras genéricas (como as que usam o app Yoosee), que costumam ter
 - **Painel rápido:** imagem ao vivo da câmera selecionada e abas para trocar de câmera sem reconectar.
 - **Janela expandida:** vídeo grande com telemetria real (resolução, FPS e codec), seletor HD/SD, som, foto e tela cheia. A janela mantém a proporção 16:9 e o cabeçalho aparece ao passar o mouse.
 - **Controle PTZ:** direcional, zoom e joystick, por ONVIF. Só aparece se a câmera for motorizada.
+- **Câmera fixada:** mini-janela flutuante com uma câmera em um dos quatro cantos da tela (acima das outras janelas e em todos os Spaces). O tamanho acompanha a tela (cerca de 1/5 da largura, de 280 a 560 pt, sempre 16:9) ou pode ser ajustado arrastando a alça no canto interno, como uma janela comum; clique duas vezes na alça para voltar ao automático. Câmera, canto, monitor e tamanho são lembrados ao reabrir o app.
 - **Visão geral:** grade com todas as câmeras, estados de conexão e botão de reconectar.
 - **Configuração:** janela responsiva com pré-visualização ao vivo e teste de sinal.
 - **Baixo consumo:** as câmeras ficam conectadas em modo espera quando o painel está fechado (ver [Desempenho](#desempenho)).
@@ -54,6 +55,8 @@ Na primeira execução o macOS pode pedir permissão de acesso à rede local. Ac
 2. Abra o ícone de ajustes e cadastre a câmera (veja abaixo).
 3. Use **Testar Sinal** para confirmar que a câmera responde na porta, depois **Salvar**.
 4. Volte ao painel: a imagem aparece em alguns segundos.
+
+Para fixar uma câmera na tela, clique no ícone de alfinete (no painel, na janela expandida ou na visão geral) e escolha o canto. Passe o mouse sobre a mini-janela para trocar de canto, abrir em janela ou desafixar; clicar nela também abre a janela da câmera.
 
 No painel, o botão de expandir abre a janela da câmera, o ícone de grade abre a visão geral e o botão **Sempre ativo** controla se as câmeras continuam conectadas com o painel fechado.
 
@@ -148,6 +151,7 @@ swift run CamBarChecks
 ```
 Sources/CamBarCore/
   Models/Camera.swift              Câmera e transporte RTSP
+  Models/PinCorner.swift           Cantos e layout adaptativo da câmera fixada
   Persistence/CameraRepository.swift  Onde a lista de câmeras é salva
   Security/CredentialStore.swift   Senhas no Keychain
   Network/Reachability.swift       Teste de conexão TCP

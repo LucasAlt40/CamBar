@@ -116,6 +116,13 @@ private struct TileContent: View {
                     Text("\(info.fpsText) FPS").font(.system(size: 10.5, design: .monospaced)).foregroundStyle(Palette.accent)
                 }
                 StatusChip(status: stream.status)
+                PinMenu(camera: camera) {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .frame(width: 24, height: 24)
+                        .background(Color.white.opacity(0.06), in: Circle())
+                }
             }
             .padding(.horizontal, 12)
             .frame(height: 40)

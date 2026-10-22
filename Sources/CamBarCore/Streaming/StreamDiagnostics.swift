@@ -94,8 +94,9 @@ package struct FFmpegLogParser {
     /// Consumes a chunk of log text. Returns `true` when `info` changed.
     @discardableResult
     package mutating func consume(_ text: String) -> Bool {
-        var lines = (pending + text).components(separatedBy: "\n")
-        pending = lines.removeLast()   // empty when the chunk ended with a newline
+        // progress lines end in "\r" only; without splitting on it `pending` would grow forever
+        var lines = (pending + text).components(separatedBy: .newlines)
+        pending = String(lines.removeLast().suffix(Self.maxPending))   // empty when the chunk ended with a newline
         return lines.reduce(false) { changed, line in handle(line) || changed }
     }
 
@@ -105,6 +106,8 @@ package struct FFmpegLogParser {
         defer { pending = "" }
         return pending.isEmpty ? false : handle(pending)
     }
+
+    private static let maxPending = 4096
 
     private mutating func handle(_ line: String) -> Bool {
         if line.localizedCaseInsensitiveContains("error") || line.contains("RTSP/1.0 4") {

@@ -10,7 +10,8 @@ package enum FFmpeg {
 
     /// RTSP in, MJPEG frames out on stdout. Hardware decoding, frames passed through as the camera sends them.
     package static func videoArguments(url: String, transport: RTSPTransport, profile: StreamProfile) -> [String] {
-        ["-loglevel", "verbose", "-fflags", "nobuffer", "-flags", "low_delay", "-hwaccel", "videotoolbox"]
+        // -nostats: the progress line is rewritten every 0.5 s with "\r" and carries nothing CamBar uses
+        ["-nostats", "-loglevel", "verbose", "-fflags", "nobuffer", "-flags", "low_delay", "-hwaccel", "videotoolbox"]
             + (profile.decodesKeyframesOnly ? ["-skip_frame", "nokey"] : [])
             + transport.ffmpegArguments
             + ["-i", url, "-an",
@@ -20,9 +21,14 @@ package enum FFmpeg {
                "-f", "mjpeg", "pipe:1"]
     }
 
+    /// Warnings ffmpeg repeats for almost every frame of some cameras; harmless, so kept out of the log file.
+    package static func isNoise(_ line: some StringProtocol) -> Bool {
+        line.contains("non monotonically increasing dts") || line.contains("deblocking filter parameters")
+    }
+
     /// RTSP in, mono 16-bit little-endian PCM out on stdout.
     package static func audioArguments(url: String, transport: RTSPTransport, sampleRate: Int) -> [String] {
-        ["-loglevel", "quiet", "-fflags", "nobuffer"]
+        ["-nostats", "-loglevel", "quiet", "-fflags", "nobuffer"]
             + transport.ffmpegArguments
             + ["-i", url, "-vn", "-f", "s16le", "-ar", "\(sampleRate)", "-ac", "1", "pipe:1"]
     }

@@ -136,6 +136,64 @@ suite("ONVIF") {
     check("a<b>&\"'".xmlEscaped == "a&lt;b&gt;&amp;&quot;&apos;", "escapa XML")
 }
 
+suite("Robustez do streaming") {
+    var parser = FFmpegLogParser()
+    for _ in 0..<5_000 { parser.consume("frame=  373 fps=0.2 q=8.0 size=    4507KiB time=00:24:59.60    \r") }
+    parser.consume("Stream #0:0: Video: h264 (Main), yuv420p, 1920x1080, 15 fps, 15 tbr\r")
+    check(parser.info?.width == 1920, "linhas terminadas em \\r são processadas e não acumulam")
+    check(FFmpeg.videoArguments(url: "rtsp://x", transport: .auto, profile: .normal).contains("-nostats"),
+          "ffmpeg sem linha de progresso")
+    check(FFmpeg.isNoise("[mjpeg @ 0x1] Application provided invalid, non monotonically increasing dts"),
+          "aviso repetido do muxer não vai para o log")
+
+    // frame grande chegando em pedaços pequenos, com o marcador final dividido entre dois pedaços
+    var mjpeg = MJPEGParser()
+    let frame = Data([0xFF, 0xD8] + Array(repeating: 0x11, count: 10_000) + [0xFF, 0xD9])
+    var found: [Data] = []
+    var offset = 0
+    for size in [700, 3_000, 6_000, 303, 1] {   // soma 10.004; o último corta entre 0xFF e 0xD9
+        found += mjpeg.append(frame.subdata(in: offset..<min(offset + size, frame.count)))
+        offset += size
+    }
+    check(found == [frame], "remonta o frame mesmo com o marcador final dividido")
+    found = mjpeg.append(frame + frame.prefix(5))
+    check(found == [frame], "frame seguinte e começo de outro no mesmo pedaço")
+}
+
+suite("Câmera fixada na tela") {
+    let screen = CGRect(x: 0, y: 25, width: 1440, height: 800)   // área visível: sem barra de menus
+    let size = PinLayout.size(in: screen)
+    check(size.width / size.height > 1.77 && size.width / size.height < 1.78, "mantém 16:9")
+    check(size.width == 288, "usa um quinto da largura")
+    check(size.height <= screen.height / 3, "nunca passa de um terço da altura")
+
+    let frames = PinCorner.allCases.map { PinLayout.frame(for: $0, in: screen) }
+    check(frames.allSatisfy { screen.contains($0) }, "fica dentro da área visível")
+    check(PinLayout.frame(for: .bottomLeading, in: screen).origin == CGPoint(x: 16, y: 41), "inferior esquerdo")
+    check(PinLayout.frame(for: .topTrailing, in: screen).maxX == 1424, "superior direito encosta na margem")
+    check(PinLayout.frame(for: .topLeading, in: screen).maxY == 809, "superior esquerdo abaixo da barra de menus")
+
+    check(PinLayout.size(in: CGRect(x: 0, y: 0, width: 800, height: 600)).width == 280, "tela pequena: mínimo de 280")
+    check(PinLayout.size(in: CGRect(x: 0, y: 0, width: 5120, height: 2800)).width == 560, "tela grande: máximo de 560")
+    let portrait = CGRect(x: 1440, y: 0, width: 1080, height: 1920)   // monitor na vertical
+    let portraitFrame = PinLayout.frame(for: .bottomTrailing, in: portrait)
+    check(portrait.contains(portraitFrame) && portraitFrame.width == 280, "monitor vertical: cabe e usa o mínimo")
+    // redimensionamento
+    check(PinLayout.size(in: screen, width: 900).width == 900, "largura escolhida pelo usuário")
+    check(PinLayout.size(in: screen, width: 50).width == PinLayout.minWidth, "não fica menor que o mínimo")
+    check(PinLayout.size(in: screen, width: 5_000).height <= screen.height - 32, "não passa da tela")
+    check(PinLayout.size(in: screen, width: nil) == size, "sem largura escolhida volta ao automático")
+    let grown = PinLayout.frame(for: .bottomTrailing, in: screen, width: 600)
+    check(grown.maxX == 1424 && grown.minY == 41, "cresce mantendo o canto fixado")
+    let diagonal = PinLayout.widthChange(dx: -160, dy: 90, pinnedTo: .bottomTrailing)
+    check(abs(diagonal - 160) < 0.01, "arrastar na diagonal 16:9 acompanha o ponteiro")
+    check(PinLayout.widthChange(dx: 100, dy: 0, pinnedTo: .bottomTrailing) < 0, "puxar para o canto fixado diminui")
+    check(PinLayout.widthChange(dx: 100, dy: -50, pinnedTo: .topLeading) > 0, "canto superior esquerdo cresce para baixo e à direita")
+    check(PinCorner.bottomTrailing.opposite == .topLeading, "alça fica no canto oposto")
+    let tiny = CGRect(x: 0, y: 0, width: 600, height: 300)
+    check(PinLayout.size(in: tiny).height <= 100, "tela baixa limita a altura")
+}
+
 suite("Repositórios em memória") {
     let repo = InMemoryCameraRepository()
     repo.save([Camera(name: "X")])
