@@ -189,8 +189,9 @@ package enum NetworkScanner {
                              progress: @escaping @Sendable (ScanProgress) -> Void,
                              found: @escaping @Sendable (DiscoveredDevice) -> Void) async -> [DiscoveredDevice] {
         let results = Results(found: found)
-        let hosts = Array(Set(networks.flatMap { hosts(around: $0.address, prefixLength: $0.prefixLength) }))
-        let targets = hosts.flatMap { host in rtspPorts.map { (host, $0) } }
+        // (named apart from hosts(around:): older compilers resolve the call to the local array)
+        let addresses = Array(Set(networks.flatMap { NetworkScanner.hosts(around: $0.address, prefixLength: $0.prefixLength) }))
+        let targets = addresses.flatMap { host in rtspPorts.map { (host, $0) } }
         progress(ScanProgress(checked: 0, total: targets.count))
 
         async let discovery: Void = withTaskGroup(of: Void.self) { group in

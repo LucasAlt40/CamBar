@@ -2,7 +2,7 @@
 # Builds CamBar.app (menu bar only, no Dock icon). Requires: brew install ffmpeg
 set -e
 # Version shown in the app and compared by "Buscar atualizações" (the release workflow passes the tag).
-VERSION=${VERSION:-1.2.0}
+VERSION=${VERSION:-1.2.1}
 cd "$(dirname "$0")"
 swift build -c release --product CamBar
 APP=build/CamBar.app
