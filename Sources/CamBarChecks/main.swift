@@ -206,5 +206,23 @@ suite("Repositórios em memória") {
     check(creds.password(for: id).isEmpty, "senha vazia remove")
 }
 
+suite("Atualizações") {
+    check(UpdateChecker.normalize("v1.2.3") == "1.2.3", "tira o v da tag")
+    check(UpdateChecker.normalize("1.1.0+abc") == "1.1.0", "ignora metadados do build")
+    check(UpdateChecker.isNewer("1.10.0", than: "1.9.0"), "compara números, não texto")
+    check(UpdateChecker.isNewer("v1.2.0", than: "1.1.0"), "tag nova é mais nova")
+    check(!UpdateChecker.isNewer("1.0", than: "1.0.0"), "1.0 e 1.0.0 são iguais")
+    check(!UpdateChecker.isNewer("1.0.0", than: "1.1.0"), "versão antiga não é atualização")
+
+    let json = #"{"tag_name":"v1.3.0","html_url":"https://github.com/x/y/releases/tag/v1.3.0","body":"Notas"}"#
+    let release = UpdateChecker.parse(Data(json.utf8))
+    check(release == ReleaseInfo(version: "1.3.0", pageURL: URL(string: "https://github.com/x/y/releases/tag/v1.3.0"), notes: "Notas"),
+          "lê a release do GitHub")
+    check(UpdateChecker.parse(Data("{}".utf8)) == nil && UpdateChecker.parse(Data("x".utf8)) == nil, "resposta inválida não quebra")
+    check(UpdateChecker.compare(release, current: "1.2.0") == .available(release!), "avisa quando há versão nova")
+    check(UpdateChecker.compare(release, current: "1.3.0") == .upToDate, "mesma versão está atualizada")
+    check(UpdateChecker.compare(nil, current: "1.3.0") == .noReleases, "sem releases publicadas")
+}
+
 print(failures == 0 ? "\n\(total) checks passaram." : "\n\(failures) de \(total) checks falharam.")
 exit(failures == 0 ? 0 : 1)

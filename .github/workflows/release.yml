@@ -1,0 +1,33 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # publishing the release
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checks
+        run: swift run CamBarChecks
+      - name: Build CamBar.app
+        run: VERSION="${GITHUB_REF_NAME#v}" ./build.sh
+      - name: Zip
+        run: ditto -c -k --keepParent build/CamBar.app CamBar.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CamBar-macOS
+          path: CamBar.zip
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" CamBar.zip
+          --title "CamBar $GITHUB_REF_NAME"
+          --notes "Descompacte e mova o CamBar.app para Aplicativos. O app é assinado de forma ad-hoc: na primeira vez, clique com o botão direito em CamBar.app → Abrir (ou rode xattr -dr com.apple.quarantine /Applications/CamBar.app). Requer o ffmpeg: brew install ffmpeg."

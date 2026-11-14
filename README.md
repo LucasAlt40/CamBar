@@ -38,6 +38,12 @@ brew install ffmpeg
 
 O CamBar procura o ffmpeg em `/opt/homebrew/bin` e `/usr/local/bin`.
 
+## Baixar
+
+Baixe o `CamBar.zip` da [página de releases](https://github.com/LucasAlt40/CamBar/releases/latest), descompacte e mova o `CamBar.app` para Aplicativos. O app é assinado de forma ad-hoc, então na primeira vez abra com o botão direito → **Abrir**. Para saber se há versão nova, use o botão de atualizações (setas circulares) no topo do painel.
+
+Também existe uma [versão para Windows](https://github.com/LucasAlt40/CamBar-Windows).
+
 ## Compilar e executar
 
 ```bash

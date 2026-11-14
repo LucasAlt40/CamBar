@@ -1,6 +1,8 @@
 #!/bin/zsh
 # Builds CamBar.app (menu bar only, no Dock icon). Requires: brew install ffmpeg
 set -e
+# Version shown in the app and compared by "Buscar atualizações" (the release workflow passes the tag).
+VERSION=${VERSION:-1.1.0}
 cd "$(dirname "$0")"
 swift build -c release --product CamBar
 APP=build/CamBar.app
@@ -18,7 +20,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleVersion</key><string>1</string>
-<key>CFBundleShortVersionString</key><string>1.0</string>
+<key>CFBundleShortVersionString</key><string>$VERSION</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 <key>NSLocalNetworkUsageDescription</key><string>Acessar as câmeras da sua rede.</string>

@@ -41,6 +41,11 @@ struct MenuView: View {
                     .frame(width: 6, height: 6)
             }
             Spacer()
+            Button { Updates.checkInteractively() } label: {
+                circleIcon(Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 12, weight: .medium)))
+            }
+            .buttonStyle(.plain)
+            .help("Buscar atualizações")
             Button { NSApplication.shared.terminate(nil) } label: {
                 circleIcon(Image(systemName: "power").font(.system(size: 12, weight: .medium)))
             }
