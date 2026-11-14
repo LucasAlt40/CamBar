@@ -224,5 +224,41 @@ suite("Atualizações") {
     check(UpdateChecker.compare(nil, current: "1.3.0") == .noReleases, "sem releases publicadas")
 }
 
+suite("Busca na rede") {
+    let me = NetworkScanner.parse("192.168.1.37")!
+    let hosts = NetworkScanner.hosts(around: me, prefixLength: 24)
+    check(hosts.count == 253 && hosts.first == "192.168.1.1" && hosts.last == "192.168.1.254", "/24 sem rede, broadcast e o próprio Mac")
+    check(!hosts.contains("192.168.1.37"), "não testa o próprio computador")
+    check(NetworkScanner.hosts(around: NetworkScanner.parse("10.0.5.9")!, prefixLength: 16).count == 253, "rede grande fica limitada à /24 do Mac")
+    check(LocalNetwork(address: NetworkScanner.parse("10.0.5.9")!, prefixLength: 16).description == "10.0.5.0/24", "descrição mostrada ao usuário")
+    check(NetworkScanner.hosts(around: NetworkScanner.parse("192.168.0.10")!, prefixLength: 30).count == 1, "rede /30")
+    check(NetworkScanner.isPrivate(NetworkScanner.parse("172.20.1.1")!) && !NetworkScanner.isPrivate(NetworkScanner.parse("172.32.0.1")!)
+          && !NetworkScanner.isPrivate(NetworkScanner.parse("8.8.8.8")!), "só faixas privadas")
+
+    let match = """
+    <SOAP-ENV:Envelope><SOAP-ENV:Body><d:ProbeMatches><d:ProbeMatch>
+    <d:Scopes>onvif://www.onvif.org/type/video_encoder onvif://www.onvif.org/name/IPCAM%20Quintal onvif://www.onvif.org/hardware/C6F0SgZ3N0PdL2</d:Scopes>
+    <d:XAddrs>http://192.168.1.20:5000/onvif/device_service http://[fe80::1]:5000/onvif/device_service</d:XAddrs>
+    </d:ProbeMatch></d:ProbeMatches></SOAP-ENV:Body></SOAP-ENV:Envelope>
+    """
+    let devices = NetworkScanner.parseProbeMatches(match)
+    check(devices.count == 1 && devices.first?.host == "192.168.1.20" && devices.first?.onvifPort == 5000, "lê host e porta ONVIF, ignora IPv6")
+    check(devices.first?.name == "IPCAM Quintal" && devices.first?.hardware == "C6F0SgZ3N0PdL2", "nome e modelo anunciados")
+    check(NetworkScanner.parseProbeMatches("lixo").isEmpty, "resposta inválida não quebra")
+    check(NetworkScanner.probeMessage(id: UUID()).contains("NetworkVideoTransmitter"), "procura só transmissores de vídeo")
+
+    check(NetworkScanner.isRTSPResponse("RTSP/1.0 401 Unauthorized\r\n"), "RTSP pedindo senha conta como câmera")
+    check(!NetworkScanner.isRTSPResponse("HTTP/1.1 400 Bad Request"), "HTTP não é RTSP")
+    check(NetworkScanner.optionsRequest(host: "1.2.3.4", port: 554).hasPrefix("OPTIONS rtsp://1.2.3.4:554/ RTSP/1.0\r\nCSeq: 1"), "pedido OPTIONS")
+
+    var onvif = devices[0]
+    onvif.host = "h"
+    let merged = NetworkScanner.merge(DiscoveredDevice(host: "h", rtspPort: 554), onvif)
+    check(merged.rtspPort == 554 && merged.onvifPort == 5000 && merged.evidence == "RTSP na porta 554 • ONVIF na porta 5000",
+          "junta RTSP e ONVIF do mesmo aparelho")
+    check(DiscoveredDevice(host: "h", rtspPort: 554).title == "Possível câmera", "título sem nome anunciado")
+    check(NetworkScanner.hostOrder("192.168.1.9", "192.168.1.10"), "ordena IPs como números")
+}
+
 print(failures == 0 ? "\n\(total) checks passaram." : "\n\(failures) de \(total) checks falharam.")
 exit(failures == 0 ? 0 : 1)

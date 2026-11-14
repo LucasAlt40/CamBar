@@ -11,6 +11,7 @@ final class SettingsViewModel: ObservableObject {
     @Published var search = ""
     @Published var showsPassword = false
     @Published var isConfirmingDelete = false
+    @Published var showsScanner = false
     @Published private(set) var selectedID: UUID?
     @Published private(set) var isNew = false
     @Published private(set) var signalTest: SignalTest = .idle
@@ -66,6 +67,16 @@ final class SettingsViewModel: ObservableObject {
         password = ""
         isNew = true
         resetTransientState()
+    }
+
+    /// New camera, prefilled with what the network scan found (address and ports).
+    func startNewCamera(from device: DiscoveredDevice) {
+        startNewCamera()
+        draft.name = device.name ?? "Câmera \(device.host)"
+        draft.host = device.host
+        draft.port = device.rtspPort ?? 554
+        draft.onvifPort = device.onvifPort
+        showsScanner = false
     }
 
     func cancel() {

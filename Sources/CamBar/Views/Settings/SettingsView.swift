@@ -30,6 +30,10 @@ struct SettingsView: View {
         .confirmationDialog("Excluir esta câmera?", isPresented: $model.isConfirmingDelete) {
             Button("Excluir", role: .destructive, action: model.deleteSelected)
         }
+        .sheet(isPresented: $model.showsScanner) {
+            ScannerView(add: model.startNewCamera(from:), close: { model.showsScanner = false })
+                .environmentObject(store)
+        }
     }
 
     // MARK: Title bar
@@ -81,6 +85,7 @@ struct SettingsView: View {
                 .padding(8)
             }
             Hairline()
+            scanButton.padding([.horizontal, .top], 12)
             addButton.padding(12)
         }
         .background(Palette.sidebar)
@@ -94,6 +99,22 @@ struct SettingsView: View {
         .padding(.horizontal, 10).padding(.vertical, 6)
         .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Palette.hairline, lineWidth: 0.5))
+    }
+
+    private var scanButton: some View {
+        Button { model.showsScanner = true } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "dot.radiowaves.left.and.right").font(.system(size: 11, weight: .semibold))
+                Text("Procurar câmeras na rede").font(.system(size: 12, weight: .medium))
+            }
+            .foregroundStyle(Palette.accent)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(Palette.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(Palette.accent.opacity(0.3), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .help("Encontrar câmeras na sua rede local")
     }
 
     private var addButton: some View {
